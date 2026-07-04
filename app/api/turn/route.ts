@@ -51,6 +51,16 @@ export async function POST(req: NextRequest) {
       { role: "user", content: userText },
     ];
     const agentText = await complete(messages);
+    if (!agentText) {
+      return NextResponse.json({
+        userText,
+        agentText:
+          language === "ru"
+            ? "Я задумалась и потеряла мысль. Отправь ещё раз, пожалуйста."
+            : "I lost my train of thought there. Send that again, please.",
+        audioBase64: null,
+      });
+    }
 
     // 3) Voice the reply. If TTS fails, the text reply still reaches the user —
     // losing the voice is a hiccup; losing the whole answer is a bug.
