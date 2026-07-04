@@ -7,21 +7,24 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type TurnBody = {
-  audioBase64: string;
+  audioBase64?: string;
+  userText?: string;
   language: "en" | "ru";
   history: { role: "user" | "assistant"; content: string }[];
 };
 
 export async function POST(req: NextRequest) {
   try {
-    const { audioBase64, language, history }: TurnBody = await req.json();
+    const { audioBase64, userText: directText, language, history }: TurnBody = await req.json();
 
-    if (!audioBase64) {
-      return NextResponse.json({ error: "No audio received." }, { status: 400 });
+    // 1) Get the user's message: either pasted/attached text, or transcribed speech.
+    let userText = (directText ?? "").trim().slice(0, 9000);
+    if (!userText) {
+      if (!audioBase64) {
+        return NextResponse.json({ error: "No audio or text received." }, { status: 400 });
+      }
+      userText = await transcribe(audioBase64, language);
     }
-
-    // 1) Transcribe what the user said.
-    const userText = await transcribe(audioBase64, language);
     if (!userText) {
       return NextResponse.json({
         userText: "",
