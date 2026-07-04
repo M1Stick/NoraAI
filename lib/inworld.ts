@@ -41,16 +41,26 @@ export async function transcribe(audioBase64: string, language: string): Promise
 }
 
 // 2) Text -> reply, via the LLM Router. Model is configurable; persona is passed in.
+// Note: reasoning models (gpt-5.5 etc.) spend tokens on internal thinking BEFORE
+// answering, and that thinking counts against max_tokens. Too small a cap means the
+// model burns the whole budget reasoning and returns empty content — so the cap is
+// generous; Nora's persona keeps the actual spoken reply short.
 export async function complete(messages: ChatMessage[]): Promise<string> {
   const model = process.env.INWORLD_LLM_MODEL || "openai/gpt-5.5";
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ model, messages, max_tokens: 220 }),
+    body: JSON.stringify({ model, messages, max_tokens: 2048 }),
   });
   if (!res.ok) throw new Error(`LLM failed (${res.status}): ${await safeText(res)}`);
   const data = await res.json();
-  return (data?.choices?.[0]?.message?.content ?? "").trim();
+  const text = (data?.choices?.[0]?.message?.content ?? "").trim();
+  if (!text) {
+    console.error(
+      `[llm] empty content; finish_reason=${data?.choices?.[0]?.finish_reason}; usage=${JSON.stringify(data?.usage ?? {})}`
+    );
+  }
+  return text;
 }
 
 // 3) Text -> speech. TTS-2 renders inline [tags]; other models would read them aloud,
