@@ -107,16 +107,16 @@ export default function Home() {
     } catch {
       base64 = await blobToBase64(blob);
     }
-    await sendTurn(base64);
+    await sendTurn({ audioBase64: base64 });
   }
 
-  async function sendTurn(audioBase64: string) {
+  async function sendTurn(payload: { audioBase64?: string; userText?: string }) {
     try {
       const res = await fetch("/api/turn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          audioBase64,
+          ...payload,
           language: lang,
           history: turns.map((t) => ({ role: t.role, content: t.content })),
         }),
@@ -153,6 +153,36 @@ export default function Home() {
     if (busy) return;
     if (status === "listening") stopRecording();
     else startRecording();
+  }
+
+  const [draft, setDraft] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function submitText() {
+    const text = draft.trim();
+    if (!text || busy || status === "listening") return;
+    setError(null);
+    setDraft("");
+    setStatus("thinking");
+    await sendTurn({ userText: text });
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const raw = await file.text();
+      const cleaned = cleanEmail(raw);
+      if (!cleaned) throw new Error("empty");
+      setDraft((prev) => (prev ? prev + "\n\n" : "") + cleaned);
+    } catch {
+      setError(
+        lang === "ru"
+          ? "Не удалось прочитать файл. Попробуй .eml, .html, .txt или .xml."
+          : "Couldn't read that file. Try .eml, .html, .txt or .xml."
+      );
+    }
   }
 
   const listening = status === "listening";
@@ -197,6 +227,34 @@ export default function Home() {
         {error && <div className="error">{error}</div>}
       </div>
 
+      <div className="composer">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 9000))}
+          placeholder={
+            lang === "ru"
+              ? "Вставь тему, текст письма — или прикрепи файл"
+              : "Paste a subject line, an email — or attach a file"
+          }
+          rows={3}
+        />
+        <div className="composer-row">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".eml,.html,.htm,.txt,.xml"
+            onChange={onFile}
+            style={{ display: "none" }}
+          />
+          <button className="ghost" onClick={() => fileRef.current?.click()} disabled={busy}>
+            {lang === "ru" ? "Прикрепить файл" : "Attach file"}
+          </button>
+          <button className="send" onClick={submitText} disabled={busy || !draft.trim()}>
+            {lang === "ru" ? "Отправить Норе" : "Send to Nora"}
+          </button>
+        </div>
+      </div>
+
       <div className="log" ref={logRef}>
         {opening ? (
           <p className="empty">{OPENING[lang]}</p>
@@ -204,7 +262,11 @@ export default function Home() {
           turns.map((t, i) => (
             <div key={i} className={`turn ${t.role === "assistant" ? "nora" : "you"}`}>
               <span className="who">{t.role === "assistant" ? "Nora" : lang === "ru" ? "Ты" : "You"}</span>
-              <span className="said">{t.content}</span>
+              <span className="said">
+                {t.role === "user" && t.content.length > 220
+                  ? t.content.slice(0, 220) + "…"
+                  : t.content}
+              </span>
             </div>
           ))
         )}
@@ -218,8 +280,33 @@ export default function Home() {
   );
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
+// Exported emails (.eml / .html) are mostly markup and inline CSS. Strip it down
+// to readable text so Nora critiques the message, not the <table> soup.
+function cleanEmail(raw: string): string {
+  const subjectMatch = raw.match(/^Subject:\s*(.+)$/im);
+  let t = raw
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<head[\s\S]*?<\/head>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#\d+;/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (subjectMatch && !t.toLowerCase().startsWith("subject")) {
+    t = `Subject: ${subjectMatch[1].trim()}\n\n${t}`;
+  }
+  return t.slice(0, 8000);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(String(reader.result).split(",")[1] || "");
     reader.onerror = reject;

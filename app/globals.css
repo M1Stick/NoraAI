@@ -195,6 +195,70 @@ body {
   min-height: 16px;
 }
 
+/* --- composer --- */
+.composer {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  resize: vertical;
+  min-height: 74px;
+  outline: none;
+}
+
+.composer textarea:focus {
+  border-color: var(--accent-dim);
+}
+
+.composer textarea::placeholder {
+  color: var(--muted);
+}
+
+.composer-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.composer-row button {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  border-radius: 999px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.composer-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.composer-row .ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.composer-row .send {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #0c1013;
+  font-weight: 700;
+}
+
 /* --- transcript --- */
 .log {
   margin-top: 20px;
