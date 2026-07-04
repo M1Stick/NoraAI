@@ -46,7 +46,7 @@ export async function complete(messages: ChatMessage[]): Promise<string> {
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 220 }),
+    body: JSON.stringify({ model, messages, max_tokens: 220 }),
   });
   if (!res.ok) throw new Error(`LLM failed (${res.status}): ${await safeText(res)}`);
   const data = await res.json();
