@@ -99,7 +99,14 @@ export default function Home() {
       setStatus("idle");
       return;
     }
-    const base64 = await blobToBase64(blob);
+    // Inworld STT chokes on webm/opus containers; convert to WAV 16kHz mono
+    // in the browser so the server always receives a format it can decode.
+    let base64: string;
+    try {
+      base64 = await blobToWavBase64(blob);
+    } catch {
+      base64 = await blobToBase64(blob);
+    }
     await sendTurn(base64);
   }
 
@@ -218,4 +225,53 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// Decode whatever the browser recorded, resample to 16kHz mono, and pack it
+// into a standard PCM16 WAV file — the most universally accepted STT input.
+async function blobToWavBase64(blob: Blob): Promise<string> {
+  const arrayBuf = await blob.arrayBuffer();
+  const ac = new AudioContext();
+  const decoded = await ac.decodeAudioData(arrayBuf);
+  ac.close().catch(() => {});
+
+  const rate = 16000;
+  const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * rate), rate);
+  const src = offline.createBufferSource();
+  src.buffer = decoded;
+  src.connect(offline.destination);
+  src.start();
+  const rendered = await offline.startRendering();
+  const pcm = rendered.getChannelData(0);
+
+  const buffer = new ArrayBuffer(44 + pcm.length * 2);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + pcm.length * 2, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
