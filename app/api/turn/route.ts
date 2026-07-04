@@ -52,10 +52,19 @@ export async function POST(req: NextRequest) {
     ];
     const agentText = await complete(messages);
 
-    // 3) Voice the reply.
-    const { audioBase64: replyAudio, mime } = await synthesize(agentText);
+    // 3) Voice the reply. If TTS fails, the text reply still reaches the user —
+    // losing the voice is a hiccup; losing the whole answer is a bug.
+    let replyAudio: string | null = null;
+    let audioMime = "audio/mpeg";
+    try {
+      const r = await synthesize(agentText);
+      replyAudio = r.audioBase64;
+      audioMime = r.mime;
+    } catch (err: any) {
+      console.error("[/api/turn] TTS:", err?.message || err);
+    }
 
-    return NextResponse.json({ userText, agentText, audioBase64: replyAudio, audioMime: mime });
+    return NextResponse.json({ userText, agentText, audioBase64: replyAudio, audioMime });
   } catch (err: any) {
     console.error("[/api/turn]", err?.message || err);
     return NextResponse.json(
