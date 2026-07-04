@@ -55,21 +55,59 @@ export async function complete(messages: ChatMessage[]): Promise<string> {
 
 // 3) Text -> speech. TTS-2 renders inline [tags]; other models would read them aloud,
 //    so we strip bracketed tags unless the expressive model is selected.
+//    Inworld TTS caps each request at ~2000 characters, so long replies are split
+//    at sentence boundaries and the MP3 chunks are concatenated server-side.
+const TTS_CHUNK_LIMIT = 1500;
+
 export async function synthesize(text: string): Promise<{ audioBase64: string; mime: string }> {
   const voiceId = process.env.INWORLD_VOICE_ID || "Sarah";
   const modelId = process.env.INWORLD_TTS_MODEL || "inworld-tts-2";
   const spoken = modelId === "inworld-tts-2" ? text : stripTags(text);
 
-  const res = await fetch(`${API_BASE}/tts/v1/voice`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify({ text: spoken, voiceId, modelId }),
-  });
-  if (!res.ok) throw new Error(`TTS failed (${res.status}): ${await safeText(res)}`);
-  const data = await res.json();
-  const audioBase64 = data?.audioContent ?? "";
-  if (!audioBase64) throw new Error("TTS returned no audio");
-  return { audioBase64, mime: "audio/mpeg" };
+  const pieces = chunkBySentence(spoken, TTS_CHUNK_LIMIT);
+  const buffers: Buffer[] = [];
+
+  for (const piece of pieces) {
+    const res = await fetch(`${API_BASE}/tts/v1/voice`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ text: piece, voiceId, modelId }),
+    });
+    if (!res.ok) throw new Error(`TTS failed (${res.status}): ${await safeText(res)}`);
+    const data = await res.json();
+    const b64 = data?.audioContent ?? "";
+    if (!b64) {
+      throw new Error(
+        `TTS returned no audio for a ${piece.length}-char chunk. Response: ${JSON.stringify(data).slice(0, 300)}`
+      );
+    }
+    buffers.push(Buffer.from(b64, "base64"));
+  }
+
+  return { audioBase64: Buffer.concat(buffers).toString("base64"), mime: "audio/mpeg" };
+}
+
+// Split text into chunks under `limit` chars, cutting at sentence ends where possible.
+export function chunkBySentence(text: string, limit: number): string[] {
+  const clean = text.trim();
+  if (clean.length <= limit) return [clean];
+  const sentences = clean.match(/[^.!?\n]+[.!?]*\s*/g) ?? [clean];
+  const chunks: string[] = [];
+  let current = "";
+  for (const s of sentences) {
+    if ((current + s).length > limit && current) {
+      chunks.push(current.trim());
+      current = "";
+    }
+    // A single sentence longer than the limit gets hard-split.
+    if (s.length > limit) {
+      for (let i = 0; i < s.length; i += limit) chunks.push(s.slice(i, i + limit).trim());
+    } else {
+      current += s;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.filter(Boolean);
 }
 
 // Remove [warm], [sigh], etc. for non-expressive TTS models.
